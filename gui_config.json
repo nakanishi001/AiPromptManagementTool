@@ -1,0 +1,32 @@
+{
+  "app_title": "AIプロンプト作成支援ツール",
+  "generation_heading": "1. AIで指示文を作成",
+  "request_label": "作成したい内容の要望",
+  "request_height": 120,
+  "input_parameters_label": "入力パラメータ",
+  "rules_label": "オプションルール",
+  "generate_prompt_label": "AIで指示文を生成",
+  "generate_parameter_label": "入力パラメータを作成",
+  "request_placeholders": {
+    "プロンプト": "例：C言語のソースコードを解析し、全体構造を簡潔に説明させたい。",
+    "ルール": "例：周辺のソースコードの書式に合わせるルールを作りたい。",
+    "入力パラメータ": "入力パラメータに登録する語句を入力してください。"
+  },
+  "custom_fields": [
+    {
+      "id": "template_select",
+      "label": "流用テンプレート",
+      "type": "selectbox",
+      "options": [
+        "なし",
+        "標準プロンプト",
+        "コード解析",
+        "仕様書作成",
+        "レビュー指示"
+      ],
+      "placeholder": "",
+      "help": "流用するテンプレートを1つ選択してください",
+      "include_in_prompt": true
+    }
+  ]
+}
