@@ -8,15 +8,34 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 PROMPTS_DIR.mkdir(exist_ok=True)
 RULES_DIR = Path(__file__).parent / "rules"
 RULES_DIR.mkdir(exist_ok=True)
+INPUT_PARAMETERS_DIR = Path(__file__).parent / "input_parameters"
+INPUT_PARAMETERS_DIR.mkdir(exist_ok=True)
 
 
 def reset_app_state():
     for key in list(st.session_state.keys()):
         if key != "reset_app":
             del st.session_state[key]
+    st.session_state["ai_request"] = ""
+
+
+def update_request_from_input_parameter(parameter_name, parameter_text):
+    request = st.session_state.get("ai_request", "")
+    parameter_key = f"input_parameter_{parameter_name}"
+
+    if st.session_state.get(parameter_key):
+        if parameter_text and parameter_text not in request:
+            request = f"{request.rstrip()}\n{parameter_text}" if request.strip() else parameter_text
+    elif parameter_text:
+        request = request.replace(parameter_text, "", 1).strip()
+
+    st.session_state["ai_request"] = request
 
 
 st.set_page_config(page_title="AI指示文管理ツール", layout="wide")
+if st.session_state.pop("clear_ai_request", False):
+    st.session_state["ai_request"] = ""
+
 title_column, update_column = st.columns([8, 1])
 with title_column:
     st.title("AI指示文管理ツール")
@@ -40,10 +59,28 @@ st.header("1. AIで指示文を作成")
 
 generation_type = st.radio(
     "生成するもの",
-    ["プロンプト", "ルール"],
+    ["プロンプト", "ルール", "入力パラメータ"],
     horizontal=True,
     key="generation_type",
 )
+
+st.subheader("入力パラメータ")
+input_parameter_files = sorted(INPUT_PARAMETERS_DIR.glob("*.md"))
+if not input_parameter_files:
+    st.caption("入力パラメータファイルがありません。")
+else:
+    parameter_columns = st.columns(min(3, len(input_parameter_files)))
+    for index, parameter_path in enumerate(input_parameter_files):
+        with parameter_columns[index % len(parameter_columns)]:
+            st.checkbox(
+                parameter_path.stem,
+                key=f"input_parameter_{parameter_path.name}",
+                on_change=update_request_from_input_parameter,
+                args=(
+                    parameter_path.name,
+                    parameter_path.read_text(encoding="utf-8").strip(),
+                ),
+            )
 
 request = st.text_area(
     "作成したい内容の要望",
@@ -73,24 +110,32 @@ if generation_type == "プロンプト":
                 ):
                     selected_rules.append(rule_path)
 
-if st.button("AIで指示文を生成", type="primary"):
+generate_button_label = (
+    "入力パラメータを作成"
+    if generation_type == "入力パラメータ"
+    else "AIで指示文を生成"
+)
+if st.button(generate_button_label, type="primary"):
     if not request.strip():
         st.warning("作成したい内容の要望を入力してください。")
     else:
         try:
-            api_key = st.secrets["GEMINI_API_KEY"]
-            client = genai.Client(api_key=api_key)
+            if generation_type == "入力パラメータ":
+                generated_text = request
+            else:
+                api_key = st.secrets["GEMINI_API_KEY"]
+                client = genai.Client(api_key=api_key)
 
-            if generation_type == "プロンプト":
-                selected_rule_text = "\n\n".join(
-                    f"### {rule_path.stem}\n"
-                    f"{rule_path.read_text(encoding='utf-8')}"
-                    for rule_path in selected_rules
-                )
-                if not selected_rule_text:
-                    selected_rule_text = "（指定なし）"
+                if generation_type == "プロンプト":
+                    selected_rule_text = "\n\n".join(
+                        f"### {rule_path.stem}\n"
+                        f"{rule_path.read_text(encoding='utf-8')}"
+                        for rule_path in selected_rules
+                    )
+                    if not selected_rule_text:
+                        selected_rule_text = "（指定なし）"
 
-                instruction = f"""
+                    instruction = f"""
 あなたは、AIへの指示文を設計するアシスタントです。
 ユーザーの要望を実現するための指示文を日本語で作成してください。
 
@@ -107,8 +152,8 @@ if st.button("AIで指示文を生成", type="primary"):
 ユーザーの要望：
 {request}
 """
-            else:
-                instruction = f"""
+                else:
+                    instruction = f"""
 あなたは、開発作業で再利用するルールを設計するアシスタントです。
 ユーザーの要望を実現するためのルールを日本語で作成してください。
 
@@ -122,16 +167,17 @@ if st.button("AIで指示文を生成", type="primary"):
 {request}
 """
 
-            with st.spinner("AIが指示文を作成しています..."):
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=instruction,
-                )
+                with st.spinner("AIが指示文を作成しています..."):
+                    response = client.models.generate_content(
+                        model="gemini-3.8-flash",
+                        contents=instruction,
+                    )
+                generated_text = response.text
 
-            if not response.text:
+            if not generated_text:
                 st.error("AIから文章を取得できませんでした。")
             else:
-                st.session_state["generated_prompt"] = response.text
+                st.session_state["generated_prompt"] = generated_text
                 st.session_state["generated_name"] = "新しい指示文"
                 st.session_state["generated_type"] = generation_type
 
@@ -162,9 +208,11 @@ if "generated_prompt" in st.session_state:
         elif not generated_content.strip():
             st.error("指示文の内容が空です。")
         else:
-            output_dir = (
-                PROMPTS_DIR if generated_type == "プロンプト" else RULES_DIR
-            )
+            output_dir = {
+                "プロンプト": PROMPTS_DIR,
+                "ルール": RULES_DIR,
+                "入力パラメータ": INPUT_PARAMETERS_DIR,
+            }[generated_type]
             save_path = output_dir / f"{generated_name.strip()}.md"
 
             if save_path.exists():
@@ -226,6 +274,7 @@ if mode == "新規作成":
             else:
                 save_path.write_text(content, encoding="utf-8")
                 st.success(f"保存しました：{save_path.name}")
+                st.session_state["clear_ai_request"] = True
                 st.rerun()
 
 elif not prompt_files:
